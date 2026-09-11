@@ -26,39 +26,57 @@
       margin: 0 0 12px;
     }
     h1 span { color: #FFD700; }
+
     #reader {
       width: 100%;
       max-width: 420px;
       border: 2px solid #FFD700;
       border-radius: 12px;
-      overflow: hidden;
+      overflow: hidden; /* จำเป็นสำหรับตัดขอบตอนซูม CSS */
     }
-    #reader video { object-fit: cover !important; }
+    /* ซูมแบบ CSS: ขยายภาพวิดีโอด้วย transform (ใช้ได้ทุกเครื่องรวม iPhone) */
+    #reader video {
+      object-fit: cover !important;
+      transition: transform 0.15s ease-out;
+      transform-origin: center center;
+    }
 
-    /* แถบควบคุม ซูม / แฟลช */
-    #controls {
+    /* แถบควบคุมซูม (พรีเซ็ต + สไลด์) */
+    #zoomWrap {
       width: 100%;
       max-width: 420px;
       margin-top: 12px;
       display: none;
       flex-direction: column;
-      gap: 10px;
+      gap: 8px;
     }
-    #zoomWrap {
-      display: none;
-      align-items: center;
-      gap: 10px;
+    #zoomPresets {
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+    }
+    .zoom-btn {
+      padding: 8px 14px;
       background: #18181b;
-      padding: 10px 14px;
-      border-radius: 12px;
+      color: #d4d4d8;
       border: 1px solid #3f3f46;
+      border-radius: 999px;
+      font-weight: 800;
+      font-size: 13px;
     }
-    #zoomWrap label { font-size: 12px; color: #a1a1aa; white-space: nowrap; }
-    #zoomSlider { flex: 1; accent-color: #FFD700; }
+    .zoom-btn.active {
+      background: #FFD700;
+      color: #000;
+      border-color: #FFD700;
+    }
+    #zoomSlider { width: 100%; accent-color: #FFD700; }
 
     #torchBtn {
       display: none;
+      margin-top: 10px;
       padding: 12px;
+      width: 100%;
+      max-width: 420px;
       background: #18181b;
       color: #FFD700;
       border: 1px solid #3f3f46;
@@ -105,13 +123,17 @@
   <h1>PRICE <span>CHECK</span> — สแกน</h1>
   <div id="reader"></div>
 
-  <div id="controls">
-    <div id="zoomWrap">
-      <label>🔍 ซูม</label>
-      <input type="range" id="zoomSlider" min="1" max="5" step="0.1" value="1">
+  <div id="zoomWrap">
+    <div id="zoomPresets">
+      <button class="zoom-btn active" data-zoom="1" onclick="setZoom(1)">1x</button>
+      <button class="zoom-btn" data-zoom="1.5" onclick="setZoom(1.5)">1.5x</button>
+      <button class="zoom-btn" data-zoom="2" onclick="setZoom(2)">2x</button>
+      <button class="zoom-btn" data-zoom="3" onclick="setZoom(3)">3x</button>
     </div>
-    <button id="torchBtn" onclick="toggleTorch()">🔦 เปิดแฟลช</button>
+    <input type="range" id="zoomSlider" min="1" max="3" step="0.1" value="1">
   </div>
+
+  <button id="torchBtn" onclick="toggleTorch()">🔦 เปิดแฟลช</button>
 
   <div id="status">กำลังเปิดกล้อง...</div>
   <button id="retryBtn" onclick="startScan()">ลองใหม่</button>
@@ -123,12 +145,92 @@
 
     let scanner = null;
     let torchOn = false;
+    let audioCtx = null;
     const statusEl = document.getElementById('status');
     const retryBtn = document.getElementById('retryBtn');
-    const controlsEl = document.getElementById('controls');
     const zoomWrap = document.getElementById('zoomWrap');
     const zoomSlider = document.getElementById('zoomSlider');
     const torchBtn = document.getElementById('torchBtn');
+
+    // ---------- ปลดล็อกเสียงบน iOS: ต้องมีการแตะหน้าจอก่อนถึงจะเล่นเสียงได้ ----------
+    function unlockAudio() {
+      if (audioCtx) return;
+      try {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+      } catch (e) { /* เบราว์เซอร์นี้อาจไม่รองรับ ไม่เป็นไร */ }
+    }
+    document.addEventListener('touchstart', unlockAudio, { once: true });
+    document.addEventListener('click', unlockAudio, { once: true });
+
+    function playBeep() {
+      try {
+        if (!audioCtx) unlockAudio();
+        if (!audioCtx) return;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.type = 'sine';
+        osc.frequency.value = 1200;
+        gain.gain.setValueAtTime(0.25, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.18);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.2);
+      } catch (e) { /* ไม่มีเสียงก็ไม่เป็นไร ยังสั่นได้ */ }
+    }
+
+    // ---------- ซูมแบบ CSS (ใช้ได้ทุกเครื่อง รวม iPhone) ----------
+    function setZoom(value) {
+      zoomSlider.value = value;
+      applyZoom(value);
+    }
+
+    function applyZoom(value) {
+      const video = document.querySelector('#reader video');
+      if (video) {
+        video.style.transform = `scale(${value})`;
+      }
+      document.querySelectorAll('.zoom-btn').forEach(btn => {
+        btn.classList.toggle('active', parseFloat(btn.dataset.zoom) === parseFloat(value));
+      });
+    }
+
+    zoomSlider.addEventListener('input', function () {
+      applyZoom(this.value);
+    });
+
+    // ---------- แฟลช/ไฟฉาย (รองรับเฉพาะ Android Chrome เท่านั้น) ----------
+    async function toggleTorch() {
+      if (!scanner) return;
+      const newState = !torchOn;
+      try {
+        await scanner.applyVideoConstraints({
+          advanced: [{ torch: newState }]
+        });
+        torchOn = newState;
+        torchBtn.textContent = torchOn ? '🔦 ปิดแฟลช' : '🔦 เปิดแฟลช';
+        torchBtn.classList.toggle('on', torchOn);
+      } catch (err) {
+        alert('อุปกรณ์นี้ไม่รองรับแฟลช');
+      }
+    }
+
+    function setupControls() {
+      // ซูม CSS โชว์เสมอ ใช้ได้ทุกเครื่อง
+      zoomWrap.style.display = 'flex';
+      applyZoom(1);
+
+      // แฟลชเช็คก่อนว่าเครื่องรองรับไหม
+      try {
+        const caps = scanner.getRunningTrackCapabilities();
+        if (caps.torch) {
+          torchBtn.style.display = 'block';
+        }
+      } catch (e) {
+        console.warn('ไม่รองรับแฟลช', e);
+      }
+    }
 
     function startScan() {
       retryBtn.style.display = 'none';
@@ -152,72 +254,6 @@
         retryBtn.style.display = 'inline-block';
         console.error(err);
       });
-    }
-
-    // เช็คว่ากล้องเครื่องนี้รองรับซูม/แฟลชไหม แล้วค่อยโชว์ปุ่ม
-    function setupControls() {
-      try {
-        const caps = scanner.getRunningTrackCapabilities();
-        let hasAny = false;
-
-        if (caps.zoom) {
-          hasAny = true;
-          zoomSlider.min = caps.zoom.min;
-          zoomSlider.max = caps.zoom.max;
-          zoomSlider.step = caps.zoom.step || 0.1;
-          zoomSlider.value = caps.zoom.min;
-          zoomWrap.style.display = 'flex';
-        }
-
-        if (caps.torch) {
-          hasAny = true;
-          torchBtn.style.display = 'block';
-        }
-
-        controlsEl.style.display = hasAny ? 'flex' : 'none';
-      } catch (e) {
-        // เครื่องนี้ไม่รองรับ ไม่ต้องทำอะไร ซ่อนปุ่มไว้เหมือนเดิม
-        console.warn('ไม่รองรับ zoom/torch', e);
-      }
-    }
-
-    zoomSlider.addEventListener('input', function () {
-      if (!scanner) return;
-      scanner.applyVideoConstraints({
-        advanced: [{ zoom: parseFloat(this.value) }]
-      }).catch(err => console.warn('ปรับซูมไม่ได้', err));
-    });
-
-    async function toggleTorch() {
-      if (!scanner) return;
-      const newState = !torchOn;
-      try {
-        await scanner.applyVideoConstraints({
-          advanced: [{ torch: newState }]
-        });
-        torchOn = newState;
-        torchBtn.textContent = torchOn ? '🔦 ปิดแฟลช' : '🔦 เปิดแฟลช';
-        torchBtn.classList.toggle('on', torchOn);
-      } catch (err) {
-        alert('อุปกรณ์นี้ไม่รองรับแฟลช');
-      }
-    }
-
-    // เสียงบี๊บตอนสแกนติด (สร้างเสียงเองไม่ต้องโหลดไฟล์)
-    function playBeep() {
-      try {
-        const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.type = 'sine';
-        osc.frequency.value = 1200;
-        gain.gain.setValueAtTime(0.25, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.18);
-        osc.start();
-        osc.stop(ctx.currentTime + 0.2);
-      } catch (e) { /* ไม่มีเสียงก็ไม่เป็นไร */ }
     }
 
     function onScanSuccess(decodedText) {
