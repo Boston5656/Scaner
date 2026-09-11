@@ -32,16 +32,14 @@
       max-width: 420px;
       border: 2px solid #FFD700;
       border-radius: 12px;
-      overflow: hidden; /* จำเป็นสำหรับตัดขอบตอนซูม CSS */
+      overflow: hidden;
     }
-    /* ซูมแบบ CSS: ขยายภาพวิดีโอด้วย transform (ใช้ได้ทุกเครื่องรวม iPhone) */
     #reader video {
       object-fit: cover !important;
       transition: transform 0.15s ease-out;
       transform-origin: center center;
     }
 
-    /* แถบควบคุมซูม (พรีเซ็ต + สไลด์) */
     #zoomWrap {
       width: 100%;
       max-width: 420px;
@@ -137,11 +135,12 @@
 
   <div id="status">กำลังเปิดกล้อง...</div>
   <button id="retryBtn" onclick="startScan()">ลองใหม่</button>
-  <button id="closeBtn" onclick="window.close()">ปิดหน้านี้</button>
+  <button id="closeBtn" onclick="goBack()">ยกเลิก / กลับหน้าหลัก</button>
 
   <script>
-    // *** สำคัญ: ใส่ origin ของ Apps Script ที่จะเปิดหน้านี้ เพื่อความปลอดภัย ***
-    const PARENT_ORIGIN = "*";
+    // อ่านค่า "return" ที่ Apps Script ส่งมาให้ตอนเปิดหน้านี้ (URL ของหน้าแอปหลัก)
+    const params = new URLSearchParams(window.location.search);
+    const RETURN_URL = params.get('return') || '';
 
     let scanner = null;
     let torchOn = false;
@@ -152,13 +151,21 @@
     const zoomSlider = document.getElementById('zoomSlider');
     const torchBtn = document.getElementById('torchBtn');
 
-    // ---------- ปลดล็อกเสียงบน iOS: ต้องมีการแตะหน้าจอก่อนถึงจะเล่นเสียงได้ ----------
+    function goBack() {
+      if (RETURN_URL) {
+        window.location.href = RETURN_URL;
+      } else {
+        history.back();
+      }
+    }
+
+    // ---------- ปลดล็อกเสียงบน iOS ----------
     function unlockAudio() {
       if (audioCtx) return;
       try {
         audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         if (audioCtx.state === 'suspended') audioCtx.resume();
-      } catch (e) { /* เบราว์เซอร์นี้อาจไม่รองรับ ไม่เป็นไร */ }
+      } catch (e) { /* ไม่รองรับก็ไม่เป็นไร */ }
     }
     document.addEventListener('touchstart', unlockAudio, { once: true });
     document.addEventListener('click', unlockAudio, { once: true });
@@ -180,7 +187,7 @@
       } catch (e) { /* ไม่มีเสียงก็ไม่เป็นไร ยังสั่นได้ */ }
     }
 
-    // ---------- ซูมแบบ CSS (ใช้ได้ทุกเครื่อง รวม iPhone) ----------
+    // ---------- ซูมแบบ CSS (ใช้ได้ทุกเครื่อง) ----------
     function setZoom(value) {
       zoomSlider.value = value;
       applyZoom(value);
@@ -200,7 +207,7 @@
       applyZoom(this.value);
     });
 
-    // ---------- แฟลช/ไฟฉาย (รองรับเฉพาะ Android Chrome เท่านั้น) ----------
+    // ---------- แฟลช (Android เท่านั้น) ----------
     async function toggleTorch() {
       if (!scanner) return;
       const newState = !torchOn;
@@ -217,11 +224,9 @@
     }
 
     function setupControls() {
-      // ซูม CSS โชว์เสมอ ใช้ได้ทุกเครื่อง
       zoomWrap.style.display = 'flex';
       applyZoom(1);
 
-      // แฟลชเช็คก่อนว่าเครื่องรองรับไหม
       try {
         const caps = scanner.getRunningTrackCapabilities();
         if (caps.torch) {
@@ -256,18 +261,27 @@
       });
     }
 
+    // สแกนติด -> เปลี่ยนหน้ากลับไปแอปหลักทันที พร้อมแนบบาร์โค้ดไปกับ URL
+    // (ไม่ใช้ postMessage/popup แล้ว เพื่อกันปัญหาแท็บโดนระบบเคลียร์หน่วยความจำ)
     function onScanSuccess(decodedText) {
       playBeep();
       if (navigator.vibrate) navigator.vibrate(100);
-      statusEl.textContent = 'เจอแล้ว: ' + decodedText;
+      statusEl.textContent = 'เจอแล้ว: ' + decodedText + ' กำลังกลับไปหน้าหลัก...';
 
-      if (window.opener) {
-        window.opener.postMessage({ type: 'barcode-scanned', barcode: decodedText }, PARENT_ORIGIN);
+      const finish = function () {
+        if (RETURN_URL) {
+          const sep = RETURN_URL.includes('?') ? '&' : '?';
+          window.location.href = RETURN_URL + sep + 'barcode=' + encodeURIComponent(decodedText);
+        } else {
+          history.back();
+        }
+      };
+
+      if (scanner) {
+        scanner.stop().then(finish).catch(finish);
+      } else {
+        finish();
       }
-
-      scanner.stop().then(() => {
-        setTimeout(() => window.close(), 300);
-      }).catch(() => window.close());
     }
 
     window.addEventListener('load', startScan);
