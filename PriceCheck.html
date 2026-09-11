@@ -34,6 +34,43 @@
       overflow: hidden;
     }
     #reader video { object-fit: cover !important; }
+
+    /* แถบควบคุม ซูม / แฟลช */
+    #controls {
+      width: 100%;
+      max-width: 420px;
+      margin-top: 12px;
+      display: none;
+      flex-direction: column;
+      gap: 10px;
+    }
+    #zoomWrap {
+      display: none;
+      align-items: center;
+      gap: 10px;
+      background: #18181b;
+      padding: 10px 14px;
+      border-radius: 12px;
+      border: 1px solid #3f3f46;
+    }
+    #zoomWrap label { font-size: 12px; color: #a1a1aa; white-space: nowrap; }
+    #zoomSlider { flex: 1; accent-color: #FFD700; }
+
+    #torchBtn {
+      display: none;
+      padding: 12px;
+      background: #18181b;
+      color: #FFD700;
+      border: 1px solid #3f3f46;
+      border-radius: 12px;
+      font-weight: 800;
+      font-size: 14px;
+    }
+    #torchBtn.on {
+      background: #FFD700;
+      color: #000;
+    }
+
     #status {
       margin-top: 14px;
       font-size: 14px;
@@ -42,7 +79,7 @@
       min-height: 20px;
     }
     #closeBtn {
-      margin-top: 16px;
+      margin-top: 10px;
       padding: 12px 24px;
       background: #27272a;
       color: #d4d4d8;
@@ -67,19 +104,31 @@
 <body>
   <h1>PRICE <span>CHECK</span> — สแกน</h1>
   <div id="reader"></div>
+
+  <div id="controls">
+    <div id="zoomWrap">
+      <label>🔍 ซูม</label>
+      <input type="range" id="zoomSlider" min="1" max="5" step="0.1" value="1">
+    </div>
+    <button id="torchBtn" onclick="toggleTorch()">🔦 เปิดแฟลช</button>
+  </div>
+
   <div id="status">กำลังเปิดกล้อง...</div>
   <button id="retryBtn" onclick="startScan()">ลองใหม่</button>
   <button id="closeBtn" onclick="window.close()">ปิดหน้านี้</button>
 
   <script>
     // *** สำคัญ: ใส่ origin ของ Apps Script ที่จะเปิดหน้านี้ เพื่อความปลอดภัย ***
-    // เช่น "https://script.google.com" หรือ "https://n-xxxxx.googleusercontent.com"
-    // ถ้าไม่แน่ใจ origin ใส่ "*" ไปก่อนได้ (แต่ควรเปลี่ยนทีหลัง)
     const PARENT_ORIGIN = "*";
 
     let scanner = null;
+    let torchOn = false;
     const statusEl = document.getElementById('status');
     const retryBtn = document.getElementById('retryBtn');
+    const controlsEl = document.getElementById('controls');
+    const zoomWrap = document.getElementById('zoomWrap');
+    const zoomSlider = document.getElementById('zoomSlider');
+    const torchBtn = document.getElementById('torchBtn');
 
     function startScan() {
       retryBtn.style.display = 'none';
@@ -95,23 +144,91 @@
         { facingMode: "environment" },
         config,
         onScanSuccess
-      ).catch(err => {
+      ).then(() => {
+        statusEl.textContent = 'เล็งกล้องไปที่บาร์โค้ด';
+        setupControls();
+      }).catch(err => {
         statusEl.textContent = 'เปิดกล้องไม่ได้ กรุณาอนุญาตสิทธิ์กล้องในเบราว์เซอร์';
         retryBtn.style.display = 'inline-block';
         console.error(err);
       });
     }
 
+    // เช็คว่ากล้องเครื่องนี้รองรับซูม/แฟลชไหม แล้วค่อยโชว์ปุ่ม
+    function setupControls() {
+      try {
+        const caps = scanner.getRunningTrackCapabilities();
+        let hasAny = false;
+
+        if (caps.zoom) {
+          hasAny = true;
+          zoomSlider.min = caps.zoom.min;
+          zoomSlider.max = caps.zoom.max;
+          zoomSlider.step = caps.zoom.step || 0.1;
+          zoomSlider.value = caps.zoom.min;
+          zoomWrap.style.display = 'flex';
+        }
+
+        if (caps.torch) {
+          hasAny = true;
+          torchBtn.style.display = 'block';
+        }
+
+        controlsEl.style.display = hasAny ? 'flex' : 'none';
+      } catch (e) {
+        // เครื่องนี้ไม่รองรับ ไม่ต้องทำอะไร ซ่อนปุ่มไว้เหมือนเดิม
+        console.warn('ไม่รองรับ zoom/torch', e);
+      }
+    }
+
+    zoomSlider.addEventListener('input', function () {
+      if (!scanner) return;
+      scanner.applyVideoConstraints({
+        advanced: [{ zoom: parseFloat(this.value) }]
+      }).catch(err => console.warn('ปรับซูมไม่ได้', err));
+    });
+
+    async function toggleTorch() {
+      if (!scanner) return;
+      const newState = !torchOn;
+      try {
+        await scanner.applyVideoConstraints({
+          advanced: [{ torch: newState }]
+        });
+        torchOn = newState;
+        torchBtn.textContent = torchOn ? '🔦 ปิดแฟลช' : '🔦 เปิดแฟลช';
+        torchBtn.classList.toggle('on', torchOn);
+      } catch (err) {
+        alert('อุปกรณ์นี้ไม่รองรับแฟลช');
+      }
+    }
+
+    // เสียงบี๊บตอนสแกนติด (สร้างเสียงเองไม่ต้องโหลดไฟล์)
+    function playBeep() {
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.type = 'sine';
+        osc.frequency.value = 1200;
+        gain.gain.setValueAtTime(0.25, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.18);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.2);
+      } catch (e) { /* ไม่มีเสียงก็ไม่เป็นไร */ }
+    }
+
     function onScanSuccess(decodedText) {
+      playBeep();
       if (navigator.vibrate) navigator.vibrate(100);
       statusEl.textContent = 'เจอแล้ว: ' + decodedText;
 
-      // ส่งผลลัพธ์กลับไปหน้าหลัก (Apps Script)
       if (window.opener) {
         window.opener.postMessage({ type: 'barcode-scanned', barcode: decodedText }, PARENT_ORIGIN);
       }
 
-      // หยุดกล้องแล้วปิดหน้าต่างอัตโนมัติ
       scanner.stop().then(() => {
         setTimeout(() => window.close(), 300);
       }).catch(() => window.close());
