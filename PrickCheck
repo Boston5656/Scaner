@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>สแกนบาร์โค้ด</title>
+  <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: #000;
+      color: #fff;
+      font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+    h1 {
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      margin: 0 0 12px;
+    }
+    h1 span { color: #FFD700; }
+    #reader {
+      width: 100%;
+      max-width: 420px;
+      border: 2px solid #FFD700;
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    #reader video { object-fit: cover !important; }
+    #status {
+      margin-top: 14px;
+      font-size: 14px;
+      color: #a1a1aa;
+      text-align: center;
+      min-height: 20px;
+    }
+    #closeBtn {
+      margin-top: 16px;
+      padding: 12px 24px;
+      background: #27272a;
+      color: #d4d4d8;
+      border: 1px solid #3f3f46;
+      border-radius: 12px;
+      font-weight: 700;
+      font-size: 14px;
+    }
+    #retryBtn {
+      margin-top: 10px;
+      padding: 10px 20px;
+      background: #FFD700;
+      color: #000;
+      border: none;
+      border-radius: 12px;
+      font-weight: 800;
+      font-size: 14px;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <h1>PRICE <span>CHECK</span> — สแกน</h1>
+  <div id="reader"></div>
+  <div id="status">กำลังเปิดกล้อง...</div>
+  <button id="retryBtn" onclick="startScan()">ลองใหม่</button>
+  <button id="closeBtn" onclick="window.close()">ปิดหน้านี้</button>
+
+  <script>
+    // *** สำคัญ: ใส่ origin ของ Apps Script ที่จะเปิดหน้านี้ เพื่อความปลอดภัย ***
+    // เช่น "https://script.google.com" หรือ "https://n-xxxxx.googleusercontent.com"
+    // ถ้าไม่แน่ใจ origin ใส่ "*" ไปก่อนได้ (แต่ควรเปลี่ยนทีหลัง)
+    const PARENT_ORIGIN = "*";
+
+    let scanner = null;
+    const statusEl = document.getElementById('status');
+    const retryBtn = document.getElementById('retryBtn');
+
+    function startScan() {
+      retryBtn.style.display = 'none';
+      statusEl.textContent = 'กำลังเปิดกล้อง...';
+
+      if (!scanner) {
+        scanner = new Html5Qrcode("reader");
+      }
+
+      const config = { fps: 10, qrbox: { width: 250, height: 150 } };
+
+      scanner.start(
+        { facingMode: "environment" },
+        config,
+        onScanSuccess
+      ).catch(err => {
+        statusEl.textContent = 'เปิดกล้องไม่ได้ กรุณาอนุญาตสิทธิ์กล้องในเบราว์เซอร์';
+        retryBtn.style.display = 'inline-block';
+        console.error(err);
+      });
+    }
+
+    function onScanSuccess(decodedText) {
+      if (navigator.vibrate) navigator.vibrate(100);
+      statusEl.textContent = 'เจอแล้ว: ' + decodedText;
+
+      // ส่งผลลัพธ์กลับไปหน้าหลัก (Apps Script)
+      if (window.opener) {
+        window.opener.postMessage({ type: 'barcode-scanned', barcode: decodedText }, PARENT_ORIGIN);
+      }
+
+      // หยุดกล้องแล้วปิดหน้าต่างอัตโนมัติ
+      scanner.stop().then(() => {
+        setTimeout(() => window.close(), 300);
+      }).catch(() => window.close());
+    }
+
+    window.addEventListener('load', startScan);
+  </script>
+</body>
+</html>
